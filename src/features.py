@@ -10,18 +10,39 @@ import numpy as np
 import pandas as pd
 
 from src.load import ADD, CANCEL, DELETE, EXEC, EXEC_HIDDEN, TICK
+from src.replay import size_at
 
 MEDIAN_WINDOW = 1000   # same-side adds used for the rolling median size
 IMBALANCE_LEVELS = 5
 WINDOW_S = 10.0
 LARGE_RATIO = 5.0      # "large" and "fast" for n_large_cancels
 FAST_S = 5.0
+CANDIDATE_PCT = 0.97   # large (for this stock-day) unfilled cancels, grouped into episodes
+CANDIDATE_LIFE_S = 30.0
+LINK_S = 3.0           # same-side candidates closer than this belong to one episode
+TOGETHER_S = 0.05
+REPEAT_WINDOW_S = 300.0
 
-# Columns the models see. Scale-free on purpose, so a model trained on one
-# stock can score another.
-FEATURES = ["size_ratio", "lifetime_s", "fill_ratio", "dist_ticks", "mid_move_bps",
-            "opp_exec_rel", "imb_jump_add", "imb_jump_end", "cancel_to_trade",
-            "n_large_cancels"]
+# What the models see, by the question each group answers. All scale-free, so a
+# model trained on one stock can score another.
+FEATURE_GROUPS = {
+    "size": ["size_ratio", "size_pct", "level_share_add", "depth_share_add",
+             "imb_jump_add", "imb_jump_end"],
+    "life and fill": ["lifetime_s", "lifetime_pct", "fill_ratio", "n_partial_cancels"],
+    "placement": ["dist_ticks", "ahead_add_rel"],
+    "cancel context": ["dist_change_ticks", "better_depth_end_rel", "t_since_trade_side",
+                       "t_since_trade_level", "mid_move_bps"],
+    "opposite trades": ["opp_exec_rel"],
+    "activity window": ["cancel_to_trade", "n_large_cancels"],
+    "episode": ["ep_n_orders", "ep_n_levels", "ep_cancel_together", "ep_repeats"],
+    "stock context": ["ctx_spread_ticks", "ctx_queue_rel"],
+}
+FEATURES = [f for group in FEATURE_GROUPS.values() for f in group]
+# Features that need the whole day (percentile ranks, day averages, episode
+# grouping). Everything else is known the moment the order ends.
+NEEDS_FULL_DAY = ["size_pct", "lifetime_pct", "ep_n_orders", "ep_n_levels",
+                  "ctx_spread_ticks", "ctx_queue_rel"]
+REALTIME_FEATURES = [f for f in FEATURES if f not in NEEDS_FULL_DAY]
 
 
 def order_lifecycles(msgs: pd.DataFrame) -> pd.DataFrame:
@@ -33,7 +54,7 @@ def order_lifecycles(msgs: pd.DataFrame) -> pd.DataFrame:
         "price": adds.price.to_numpy(), "direction": adds.direction.to_numpy(),
         "add_row": adds.index.to_numpy(),
     }, index=pd.Index(adds.order_id.to_numpy(), name="order_id"))
-    for col in ("role", "episode"):
+    for col in ("role", "episode", "reason"):
         if col in msgs:
             orders[col] = adds[col].to_numpy()
 
@@ -55,6 +76,8 @@ def order_lifecycles(msgs: pd.DataFrame) -> pd.DataFrame:
     orders["t_end"] = t_end
     orders["lifetime_s"] = t_end - orders.t_add
     orders["fill_ratio"] = orders.filled_qty / orders.size_add
+    partial = later[later.event_type == CANCEL].groupby("order_id").size()
+    orders["n_partial_cancels"] = partial.reindex(orders.index).fillna(0).astype("int64")
     return orders
 
 
@@ -123,9 +146,103 @@ def build_features(msgs: pd.DataFrame, book: np.ndarray) -> pd.DataFrame:
     count = np.searchsorted(ends, t_end, "right") - np.searchsorted(ends, t_end - WINDOW_S, "left")
     orders["n_large_cancels"] = np.where(ended, count - fast_large, np.nan)
 
+    _cancel_context(orders, msgs, book, median.to_numpy(), before_end, ended)
+    _market_relative(orders, book, median.to_numpy())
+    _episodes(orders)
+
     if "role" in orders:
         orders["label"] = (orders.role == "spoof").astype("int8")
     return orders
+
+
+def _cancel_context(orders, msgs, book, median, before_end, ended) -> None:
+    """What the market looked like just before the order ended."""
+    direction, price = orders.direction.to_numpy(), orders.price.to_numpy()
+    snap = book[before_end]
+
+    # did the best price come toward the order (negative) or move away (positive)?
+    best_end = np.where(direction == 1, snap[:, 2], snap[:, 0])
+    dist_end = direction * (best_end - price) / TICK
+    orders["dist_change_ticks"] = np.where(ended, dist_end - orders.dist_ticks, np.nan)
+
+    # shares that would have to trade before the market reaches the order's price
+    better_ask = (snap[:, 1::4] * (snap[:, 0::4] < price[:, None])).sum(axis=1)
+    better_bid = (snap[:, 3::4] * (snap[:, 2::4] > price[:, None])).sum(axis=1)
+    better = np.where(direction == 1, better_bid, better_ask)
+    orders["better_depth_end_rel"] = np.where(ended, better / median, np.nan)
+
+    # time since the last trade on the order's side, and at its own price
+    execs = msgs[msgs.event_type.isin([EXEC, EXEC_HIDDEN])]
+    ends = pd.DataFrame({"t_end": orders.t_end.to_numpy(), "direction": direction, "price": price,
+                         "pos": np.arange(len(orders))}).dropna().sort_values("t_end")
+    last = execs[["time", "direction", "price"]].rename(columns={"time": "t_trade"}).sort_values("t_trade")
+    for name, keys in (("t_since_trade_side", ["direction"]), ("t_since_trade_level", ["direction", "price"])):
+        hit = pd.merge_asof(ends, last[["t_trade", *keys]], left_on="t_end", right_on="t_trade",
+                            by=keys, allow_exact_matches=False)
+        since = np.full(len(orders), np.nan)
+        since[hit.pos.to_numpy()] = (hit.t_end - hit.t_trade).to_numpy()
+        orders[name] = since
+
+
+def _market_relative(orders, book, median) -> None:
+    """Size judged against the book around the order, and against the stock's day."""
+    direction, price = orders.direction.to_numpy(), orders.price.to_numpy()
+    add_row, size = orders.add_row.to_numpy(), orders.size_add.to_numpy()
+
+    level = size_at(book, add_row, price, direction)  # queue at its price, itself included
+    orders["level_share_add"] = np.where(level > 0, size / np.maximum(level, size), np.nan)
+    orders["ahead_add_rel"] = np.where(level > 0, np.maximum(level - size, 0) / median, np.nan)
+    snap = book[add_row]
+    depth = np.where(direction == 1, snap[:, 3: 4 * IMBALANCE_LEVELS: 4].sum(axis=1),
+                     snap[:, 1: 4 * IMBALANCE_LEVELS: 4].sum(axis=1))
+    orders["depth_share_add"] = size / np.maximum(depth, size)
+
+    # percentile ranks inside this stock-day: "big for MSFT" and "big for AMZN" line up
+    orders["size_pct"] = orders.groupby("direction")["size_add"].rank(pct=True)
+    orders["lifetime_pct"] = orders.lifetime_s.rank(pct=True)
+
+    # what kind of stock this is, the same value on every row of the day
+    spread = (book[:, 0] - book[:, 2]) / TICK
+    orders["ctx_spread_ticks"] = float(np.mean(spread))
+    orders["ctx_queue_rel"] = float(np.mean(book[:, 1] + book[:, 3]) / 2 / np.median(size))
+
+
+def _episodes(orders) -> None:
+    """Group large unfilled cancels on one side into candidate episodes.
+
+    An analyst reviews an incident, not a row: layered orders and quick repeats
+    belong together. ``alert_group`` is the episode id for candidates and a
+    unique id for every other order.
+    """
+    cand = ((orders.status == "deleted") & (orders.filled_qty == 0)
+            & (orders.size_pct >= CANDIDATE_PCT) & (orders.lifetime_s < CANDIDATE_LIFE_S)).to_numpy()
+    n = len(orders)
+    group = -np.arange(1, n + 1)  # non-candidates stand alone
+    n_orders, n_levels, together, repeats = (np.zeros(n) for _ in range(4))
+    t_add, t_end = orders.t_add.to_numpy(), orders.t_end.to_numpy()
+    price, direction = orders.price.to_numpy(), orders.direction.to_numpy()
+    next_id = 0
+    for side in (-1, 1):
+        idx = np.flatnonzero(cand & (direction == side))
+        if not len(idx):
+            continue
+        idx = idx[np.argsort(t_add[idx], kind="stable")]
+        prev_end = np.concatenate([[-np.inf], np.maximum.accumulate(t_end[idx])[:-1]])
+        cluster = np.cumsum(t_add[idx] > prev_end + LINK_S) - 1 + next_id
+        next_id = cluster[-1] + 1
+        group[idx] = cluster
+        frame = pd.DataFrame({"cluster": cluster, "price": price[idx]})
+        n_orders[idx] = frame.groupby("cluster")["price"].transform("size").to_numpy()
+        n_levels[idx] = frame.groupby("cluster")["price"].transform("nunique").to_numpy()
+        ends = np.sort(t_end[idx])
+        together[idx] = (np.searchsorted(ends, t_end[idx] + TOGETHER_S, "right")
+                         - np.searchsorted(ends, t_end[idx] - TOGETHER_S, "left") - 1)
+        repeats[idx] = (np.searchsorted(ends, t_add[idx], "left")
+                        - np.searchsorted(ends, t_add[idx] - REPEAT_WINDOW_S, "left"))
+    orders["alert_group"] = group
+    orders["candidate"] = cand
+    orders["ep_n_orders"], orders["ep_n_levels"] = n_orders, n_levels
+    orders["ep_cancel_together"], orders["ep_repeats"] = together, repeats
 
 
 def level_jump_features(time: np.ndarray, book: np.ndarray, depth: int = 5,

@@ -85,3 +85,18 @@ def test_injection_is_deterministic_and_seed_dependent(toy_day):
     assert a.equals(b)
     other = inject(msgs, book, InjectionConfig(n_episodes=(8, 8), n_hard_neg=(10, 10), seed=6))
     assert not a[a.injected].time.reset_index(drop=True).equals(other[other.injected].time.reset_index(drop=True))
+
+
+def test_spoofs_are_cancelled_for_more_than_one_reason(injected):
+    _, _, out, book = injected
+    orders = build_features(out, book)
+    spoof = orders[orders.role == "spoof"]
+    assert set(spoof.reason) <= {"timer", "after_fill", "approach"} and spoof.reason.nunique() >= 2
+    assert set(orders[orders.role == "hard_neg"].reason) == {"moved_away"}
+    assert (orders[orders.role == "orig"].reason == "").all()
+    fills = out[(out.role == "genuine") & (out.event_type == EXEC)].groupby("episode").time
+    after_fill = spoof[spoof.reason == "after_fill"]
+    assert len(after_fill) > 0
+    for _, o in after_fill.iterrows():
+        gap = o.t_end - fills.get_group(o.episode).to_numpy()
+        assert ((gap > 0) & (gap < 0.35)).any()   # pulled within a third of a second of its fill

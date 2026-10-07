@@ -40,6 +40,9 @@ class InjectionConfig:
     max_layers: int = 3                         # spoof orders resting at once
     max_repeats: int = 3                        # back-to-back rounds per episode
     react_share: float = 0.5
+    # why a spoof is pulled: after a fixed hold, right after its own fill, or
+    # when the best price starts moving toward it
+    cancel_reasons: tuple[str, ...] = ("timer", "after_fill", "approach")
     n_hard_neg: tuple[int, int] = (60, 120)
     seed: int = 0
 
@@ -66,8 +69,8 @@ class _Injector:
         """Last original row at or before time t."""
         return int(np.searchsorted(self.time, t, side="right")) - 1
 
-    def emit(self, t, event_type, order_id, size, price, direction, role, episode):
-        self.rows.append((t, event_type, order_id, size, price, direction, role, episode,
+    def emit(self, t, event_type, order_id, size, price, direction, role, episode, reason):
+        self.rows.append((t, event_type, order_id, size, price, direction, role, episode, reason,
                           self.row_at(t)))
 
     def big_size(self, direction: int) -> int:
@@ -117,21 +120,33 @@ class _Injector:
         choices = np.arange(lo, hi + 1)
         return self.rng.choice(choices, size=min(n, len(choices)), replace=False).tolist()
 
-    def big_orders(self, t_start, t_cancel, direction, levels, role, episode) -> float | None:
-        """Add large orders and cancel them together. Returns the cancel time."""
+    def first_approach(self, t_start: float, t_end: float, direction: int) -> float | None:
+        """First time the best price on the order's side moves toward the order."""
+        row = self.row_at(t_start)
+        best = self.ask if direction == -1 else self.bid
+        seg = best[row + 1: self.row_at(t_end) + 1]
+        hit = direction * (seg - best[row]) < 0
+        return float(self.time[row + 1 + int(hit.argmax())]) if hit.any() else None
+
+    def big_orders(self, t_start, t_cancel, direction, levels, role, episode, reason):
+        """Add large orders and cancel them together. Returns (cancel time, reason)."""
         orders = []
         for i, level in enumerate(levels):
             t_add = t_start + i * self.rng.uniform(0.005, 0.05)
             price = self.level_price(self.row_at(t_add), direction, level)
             orders.append((t_add, price, self.big_size(direction)))
-            t_cancel = self.safe_cancel(t_add, t_cancel, price, direction)
+            safe = self.safe_cancel(t_add, t_cancel, price, direction)
+            if safe < t_cancel and role == "spoof":
+                reason = "approach"  # pulled because the market was about to reach it
+            t_cancel = safe
         if t_cancel - orders[-1][0] < MIN_LIFE_S:
             return None
         for i, (t_add, price, size) in enumerate(orders):
             order_id, self.next_id = self.next_id, self.next_id + 1
-            self.emit(t_add, ADD, order_id, size, price, direction, role, episode)
-            self.emit(t_cancel - 0.002 * i, DELETE, order_id, size, price, direction, role, episode)
-        return t_cancel
+            self.emit(t_add, ADD, order_id, size, price, direction, role, episode, reason)
+            self.emit(t_cancel - 0.002 * i, DELETE, order_id, size, price, direction, role,
+                      episode, reason)
+        return t_cancel, reason
 
     # -- episodes ----------------------------------------------------------
     def spoof(self, episode: int) -> None:
@@ -139,15 +154,27 @@ class _Injector:
         t0, direction, _ = self.anchor(need_move=rng.random() < cfg.react_share)
         for _ in range(rng.integers(1, cfg.max_repeats + 1)):
             hold = rng.uniform(*cfg.hold_s)
-            n_layers = rng.integers(1, cfg.max_layers + 1)
-            t_cancel = self.big_orders(t0, t0 + hold, direction, self.levels(n_layers),
-                                       "spoof", episode)
-            if t_cancel is not None:
-                self.genuine_trade(t0 + rng.uniform(0.3, 0.8) * (t_cancel - t0),
-                                   -direction, episode)
+            levels = self.levels(rng.integers(1, cfg.max_layers + 1))
+            reason = str(rng.choice(cfg.cancel_reasons))
+            t_cancel, t_fill = t0 + hold, None
+            if reason == "after_fill":
+                t_fill = t0 + rng.uniform(0.3, 0.8) * hold
+                t_cancel = t_fill + rng.uniform(0.02, 0.3)
+            elif reason == "approach":
+                t_near = self.first_approach(t0 + 0.1, t0 + hold, direction)
+                if t_near is None:
+                    reason = "timer"  # the market never came closer, so the hold just ran out
+                else:
+                    t_cancel = t_near + rng.uniform(0.01, 0.1)
+            placed = self.big_orders(t0, t_cancel, direction, levels, "spoof", episode, reason)
+            if placed is not None:
+                t_end, reason = placed
+                if t_fill is None or t_fill > t_end - 0.02:
+                    t_fill = t0 + rng.uniform(0.3, 0.8) * (t_end - t0)
+                self.genuine_trade(t_fill, -direction, episode, reason)
             t0 += hold + rng.uniform(0.5, 3.0)
 
-    def genuine_trade(self, t: float, direction: int, episode: int) -> None:
+    def genuine_trade(self, t: float, direction: int, episode: int, reason: str) -> None:
         """The order the spoofer wants filled: small, at or inside the best price."""
         row = self.row_at(t)
         best = self.bid[row] if direction == 1 else self.ask[row]
@@ -155,23 +182,24 @@ class _Injector:
         price = int(best + direction * TICK) if inside else int(best)
         size = int(self.rng.choice(self.trade_sizes[direction]))
         order_id, self.next_id = self.next_id, self.next_id + 1
-        self.emit(t, ADD, order_id, size, price, direction, "genuine", episode)
-        self.emit(t + 1e-4, EXEC, order_id, size, price, direction, "genuine", episode)
+        self.emit(t, ADD, order_id, size, price, direction, "genuine", episode, reason)
+        self.emit(t + 1e-4, EXEC, order_id, size, price, direction, "genuine", episode, reason)
 
     def hard_negative(self, episode: int) -> None:
         t0, direction, move_row = self.anchor(need_move=True)
         if move_row is None:
             return
         t_cancel = self.time[move_row] + self.rng.uniform(0.05, 0.5)
-        self.big_orders(t0, t_cancel, direction, self.levels(1), "hard_neg", episode)
+        self.big_orders(t0, t_cancel, direction, self.levels(1), "hard_neg", episode, "moved_away")
 
 
 def inject(msgs: pd.DataFrame, book: np.ndarray, cfg: InjectionConfig) -> pd.DataFrame:
     """Return the message stream with injected episodes merged in, time-ordered.
 
     Extra columns: ``role`` (orig / spoof / genuine / hard_neg), ``label`` (1 on
-    every row of a spoof episode), ``episode`` (-1 on original rows),
-    ``injected`` and ``orig_row`` (the original row whose book is in force).
+    every row of a spoof episode), ``episode`` (-1 on original rows), ``reason``
+    (why an injected order was cancelled), ``injected`` and ``orig_row`` (the
+    original row whose book is in force).
     """
     inj = _Injector(msgs, book, cfg)
     n_spoof = int(inj.rng.integers(cfg.n_episodes[0], cfg.n_episodes[1] + 1))
@@ -181,8 +209,8 @@ def inject(msgs: pd.DataFrame, book: np.ndarray, cfg: InjectionConfig) -> pd.Dat
     for episode in range(n_spoof, n_spoof + n_hard):
         inj.hard_negative(episode)
 
-    orig = msgs.assign(role="orig", episode=-1, orig_row=np.arange(len(msgs)), injected=False)
-    new = pd.DataFrame(inj.rows, columns=[*msgs.columns, "role", "episode", "orig_row"])
+    orig = msgs.assign(role="orig", episode=-1, reason="", orig_row=np.arange(len(msgs)), injected=False)
+    new = pd.DataFrame(inj.rows, columns=[*msgs.columns, "role", "episode", "reason", "orig_row"])
     new["injected"] = True
     out = pd.concat([orig, new.astype(orig.dtypes.to_dict())], ignore_index=True)
     out = out.sort_values(["orig_row", "injected", "time"], kind="stable", ignore_index=True)
