@@ -1,0 +1,22 @@
+[project]
+name = "spoof-detector"
+version = "0.1.0"
+description = "Limit order book surveillance: replay, synthetic spoof injection, detection, dashboard"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+    "pandas",
+    "pyarrow",
+    "sortedcontainers",
+    "scikit-learn",
+    "lightgbm",
+    "streamlit",
+    "plotly",
+]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
