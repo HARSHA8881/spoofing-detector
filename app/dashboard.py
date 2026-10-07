@@ -346,7 +346,10 @@ def review_tab(ticker: str, detector: str, k: int, by_episode: bool, show_truth:
                 f'({int((verdicts == "spoof").sum())} spoof, {int((verdicts == "not spoof").sum())} not spoof). '
                 "Retraining adds them to the training set with extra weight and rescores the day; the result "
                 'appears as the detector "LightGBM + your reviews".</div>', unsafe_allow_html=True)
-    if c2.button("Retrain with my reviews", disabled=n == 0, use_container_width=True, type="primary"):
+    can_retrain = (ART / "features" / "train.parquet").exists()  # left out of the hosted app: too large
+    if not can_retrain:
+        c2.caption("Retraining needs the training set, which is only available when run locally.")
+    elif c2.button("Retrain with my reviews", disabled=n == 0, use_container_width=True, type="primary"):
         with st.spinner("Retraining LightGBM"):
             st.session_state[f"reviewed_{ticker}"] = feedback.retrain(
                 load_train(), scored, labels[labels.ticker == ticker])
