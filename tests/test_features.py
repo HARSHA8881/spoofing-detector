@@ -80,3 +80,45 @@ def test_level_jump_flags_a_size_spike_that_reverts():
     hit = lv[(lv.level_jump_z >= 4) & lv.revert_s.notna()]
     assert len(hit) == 1
     assert hit.iloc[0].direction == 1 and hit.iloc[0].level == 1 and hit.iloc[0].revert_s == 2.0
+
+
+def test_cancel_context_and_market_relative_features():
+    msgs = story()
+    f = build_features(msgs, replay(msgs, depth=5))
+    big = f.loc[3]
+    assert big.dist_change_ticks == 0             # the ask never moved while it rested
+    assert big.level_share_add == 1.0             # alone at its price
+    assert big.ahead_add_rel == 0
+    assert big.depth_share_add == pytest.approx(1000 / 1100)
+    assert big.better_depth_end_rel == pytest.approx(100 / 100)  # the 100-share ask in front of it
+    assert np.isnan(big.t_since_trade_side)       # nothing traded on the sell side
+    assert f.loc[1].n_partial_cancels == 1
+    # order 1 (a buy) ended at 14.0; the previous buy-side trade was order 4 at 11.6
+    assert f.loc[1].t_since_trade_side == pytest.approx(2.4)
+    assert f.size_pct.between(0, 1).all() and f.ctx_spread_ticks.nunique() == 1
+
+
+def test_price_coming_toward_the_order_gives_a_negative_distance_change():
+    msgs = make_messages([
+        (1.0, ADD, 1, 100, P, 1), (1.0, ADD, 2, 100, P + 10 * TICK, -1),
+        (2.0, ADD, 3, 500, P + 12 * TICK, -1),     # two ticks behind the ask
+        (3.0, DELETE, 2, 100, P + 10 * TICK, -1),  # the ask in front of it goes away
+        (4.0, DELETE, 3, 500, P + 12 * TICK, -1),
+    ])
+    f = build_features(msgs, replay(msgs, depth=5))
+    assert f.loc[3].dist_ticks == 2 and f.loc[3].dist_change_ticks == -2
+
+
+def test_layered_orders_cancelled_together_form_one_episode():
+    rows = [(float(i), ADD, i, 100, P + 10 * TICK, -1) for i in range(1, 60)]
+    rows += [(100.0, ADD, 100, 5000, P + 11 * TICK, -1), (100.01, ADD, 101, 5000, P + 12 * TICK, -1),
+             (101.0, DELETE, 100, 5000, P + 11 * TICK, -1), (101.002, DELETE, 101, 5000, P + 12 * TICK, -1),
+             (300.0, ADD, 102, 5000, P + 11 * TICK, -1), (301.0, DELETE, 102, 5000, P + 11 * TICK, -1)]
+    msgs = make_messages(sorted(rows))
+    f = build_features(msgs, replay(msgs, depth=5))
+    assert f.loc[[100, 101, 102], "candidate"].all() and not f.loc[1, "candidate"]
+    assert f.loc[100, "alert_group"] == f.loc[101, "alert_group"] != f.loc[102, "alert_group"]
+    assert f.loc[100, "ep_n_orders"] == 2 and f.loc[100, "ep_n_levels"] == 2
+    assert f.loc[100, "ep_cancel_together"] == 1 and f.loc[102, "ep_cancel_together"] == 0
+    assert f.loc[102, "ep_repeats"] == 2          # two earlier large cancels in the last 5 minutes
+    assert f.alert_group.nunique() == len(f) - 1  # every other order stands alone

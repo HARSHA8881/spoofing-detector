@@ -171,7 +171,7 @@ def match_rate(replayed: np.ndarray, official: np.ndarray, levels: int) -> float
     return float((replayed[:, :cols] == official[:, :cols]).all(axis=1).mean())
 
 
-def _size_at(book: np.ndarray, rows: np.ndarray, price: np.ndarray, direction: np.ndarray) -> np.ndarray:
+def size_at(book: np.ndarray, rows: np.ndarray, price: np.ndarray, direction: np.ndarray) -> np.ndarray:
     """Visible size at (direction, price) in the given orderbook rows, 0 if absent."""
     sub = book[rows]
     out = np.zeros(len(rows), dtype=np.int64)
@@ -204,7 +204,7 @@ def check_against_official(msgs: pd.DataFrame, official: np.ndarray) -> float:
     idx = np.flatnonzero(np.isin(types, (ADD, CANCEL, DELETE, EXEC)))
     idx = idx[idx > 0]
     price, direction = msgs.price.to_numpy()[idx], msgs.direction.to_numpy()[idx]
-    actual = _size_at(official, idx, price, direction) - _size_at(official, idx - 1, price, direction)
+    actual = size_at(official, idx, price, direction) - size_at(official, idx - 1, price, direction)
     return float((actual == predicted[idx]).mean())
 
 

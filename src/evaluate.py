@@ -33,6 +33,26 @@ def hard_negative_fpr(is_hard_neg: np.ndarray, scores: np.ndarray, k: int) -> fl
     return float(is_hard_neg[top_k(scores, k)].sum() / max(is_hard_neg.sum(), 1))
 
 
+def top_episodes(orders: pd.DataFrame, scores: np.ndarray, k: int) -> np.ndarray:
+    """Alert groups an analyst would open first: each group ranked by its best order."""
+    ranked = orders.alert_group.to_numpy()[np.argsort(-np.asarray(scores), kind="stable")]
+    _, first = np.unique(ranked, return_index=True)
+    return ranked[np.sort(first)[:k]]
+
+
+def episode_metrics(orders: pd.DataFrame, scores: np.ndarray, k: int) -> tuple[float, float]:
+    """Precision and recall when the unit reviewed is an episode, not an order.
+
+    Precision: share of the top k alert groups that contain an injected spoof.
+    Recall: share of the injected episodes with an order in those groups.
+    """
+    groups = top_episodes(orders, scores, k)
+    spoof = orders[orders.label == 1]
+    hit = spoof[spoof.alert_group.isin(groups)]
+    precision = np.isin(groups, spoof.alert_group.to_numpy()).mean()
+    return float(precision), float(hit.episode.nunique() / max(spoof.episode.nunique(), 1))
+
+
 def evaluate_day(orders: pd.DataFrame, scores: np.ndarray, ks=KS) -> dict:
     """Metrics for one stock-day. ``orders`` needs ``label`` and ``role``."""
     y = orders.label.to_numpy()
@@ -43,6 +63,27 @@ def evaluate_day(orders: pd.DataFrame, scores: np.ndarray, ks=KS) -> dict:
         out[f"precision@{k}"] = precision_at_k(y, scores, k)
         out[f"recall@{k}"] = recall_at_k(y, scores, k)
         out[f"hard_neg_fpr@{k}"] = hard_negative_fpr(hard, scores, k)
+        if "alert_group" in orders:
+            out[f"ep_precision@{k}"], out[f"ep_recall@{k}"] = episode_metrics(orders, scores, k)
+    return out
+
+
+def bootstrap(y: np.ndarray, scores: np.ndarray, ks=KS, n_boot: int = 200, seed: int = 0) -> dict:
+    """Bootstrap replicates of PR-AUC and precision@k for one stock-day.
+
+    Poisson bootstrap: every order gets a random weight (how many times it was
+    "drawn"). The orders are sorted by score once, so each replicate is O(n).
+    """
+    rng = np.random.default_rng(seed)
+    y = np.asarray(y)[np.argsort(-np.asarray(scores), kind="stable")].astype(float)
+    out = {"pr_auc": np.empty(n_boot), **{f"precision@{k}": np.empty(n_boot) for k in ks}}
+    for b in range(n_boot):
+        w = rng.poisson(1.0, len(y))
+        hits, seen = np.cumsum(w * y), np.cumsum(w)
+        precision = hits / np.maximum(seen, 1)
+        out["pr_auc"][b] = (precision * w * y).sum() / max(hits[-1], 1)
+        for k in ks:
+            out[f"precision@{k}"][b] = precision[min(np.searchsorted(seen, k), len(y) - 1)]
     return out
 
 

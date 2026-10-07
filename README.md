@@ -8,61 +8,115 @@ alerts for a human to review.
 
 It flags order patterns. It does not accuse anyone, and it does not trade.
 
+**Headline:** on stocks it never trained on, the best model puts injected spoof
+orders in 84% of its top 50 daily alerts (mean of 5 injection seeds), against a
+base rate of 1 spoof in 1,600 orders. Its remaining false alarms are mostly
+legitimate-looking large cancels, and only a third of spoofs cancelled on a
+plain timer make its top 100.
+
 ## Results
 
-Test set: AMZN and MSFT on 2012-06-21 (462k orders, 267 injected spoof orders,
-188 hard negatives). Trained on AAPL, GOOG and INTC with different injection
-settings. Mean over the two test days:
+Test set: AMZN and MSFT on 2012-06-21 (about 462k orders, 290 injected spoof
+orders and 190 hard negatives per seed). Trained on AAPL, GOOG and INTC with
+different injection settings. Every number is "after the fact": an order is
+scored once it has ended. Mean ± standard deviation over 5 injection seeds,
+each averaged over the two test days:
 
-| Detector | PR-AUC | Precision@20 | Precision@50 | Precision@100 | Recall@100 | Hard-negative FPR@50 |
-|---|---|---|---|---|---|---|
-| Rule baseline | 0.188 | 0.00 | 0.16 | 0.25 | 0.23 | 0.07 |
-| Isolation Forest | 0.006 | 0.00 | 0.00 | 0.00 | 0.00 | 0.01 |
-| LightGBM | **0.246** | **0.48** | **0.52** | **0.41** | **0.33** | 0.07 |
+| Detector | PR-AUC | Precision@20 | Precision@50 | Precision@100 | Hard-negative FPR@50 |
+|---|---|---|---|---|---|
+| Rule scorecard | 0.17 ± 0.01 | 0.20 ± 0.04 | 0.18 ± 0.02 | 0.22 ± 0.02 | 0.00 |
+| Isolation Forest | 0.04 ± 0.01 | 0.06 ± 0.03 | 0.05 ± 0.01 | 0.05 ± 0.01 | 0.04 |
+| LightGBM classifier | 0.51 ± 0.02 | 0.87 ± 0.09 | 0.79 ± 0.09 | 0.66 ± 0.04 | 0.04 |
+| LightGBM ranker (LambdaRank) | **0.56 ± 0.02** | **0.92 ± 0.03** | **0.84 ± 0.06** | **0.68 ± 0.06** | 0.04 |
 
-The base rate is 0.06%, so a random ranking has PR-AUC 0.0006.
+Scored as episodes (layered orders and quick repeats on one side count as one
+alert, ranked by their most suspicious order):
 
-Two follow-up runs on the same test days, LightGBM only:
+| Detector | Episode precision@20 | Episode precision@50 | Injected episodes found in top 50 |
+|---|---|---|---|
+| Rule scorecard | 0.27 ± 0.03 | 0.24 ± 0.04 | 0.33 ± 0.03 |
+| Isolation Forest | 0.12 ± 0.05 | 0.13 ± 0.02 | 0.18 ± 0.03 |
+| LightGBM classifier | 0.77 ± 0.09 | 0.60 ± 0.04 | 0.73 ± 0.02 |
+| LightGBM ranker | **0.83 ± 0.05** | **0.61 ± 0.06** | **0.74 ± 0.04** |
 
-| Training / test injection settings | PR-AUC | Precision@50 | Precision@100 | Recall@100 |
-|---|---|---|---|---|
-| Narrow training (k = 10-20), test k = 5-15 (the table above) | 0.246 | 0.52 | 0.41 | 0.33 |
-| Wide training (k = 3-30, holds 0.2-10 s), test k = 5-15 | 0.304 | 0.44 | 0.48 | 0.38 |
-| Narrow training, test injected with the training settings | 0.678 | 0.70 | 0.77 | 0.65 |
+95% bootstrap intervals for seed 0 (resampling orders): LightGBM classifier
+PR-AUC 0.45-0.56, ranker 0.48-0.57; precision@50 0.73-0.87 and 0.70-0.87. The
+ranker's edge over the classifier is inside those intervals on one seed, but it
+is ahead on PR-AUC in all five seeds.
 
-What the numbers say:
+### What changed the result
 
-- **LightGBM is the only detector an analyst could work from**, and it is far
-  from solved: about half of its top 50 alerts per day are not injected spoofs.
-- **Smaller spoofs are simply harder, not just unfamiliar.** The model scores
-  0.678 PR-AUC when the test spoofs are as large as the training ones and 0.246
-  when they are smaller. Training on a wide range that covers the test settings
-  only recovers it to 0.304, and precision@50 gets worse. So most of the drop
-  is the task getting harder (a 5x order hides among natural large orders),
-  not the model memorising one injection style.
-- **MSFT is the weak spot.** LightGBM's PR-AUC is 0.40 on AMZN and 0.09 on
-  MSFT, a one-tick-spread stock with far more natural large fast cancels.
-- **Hard negatives are a real problem.** A large order cancelled after the
-  price moved away looks almost the same as a spoof without trader IDs. On AMZN
-  36 of LightGBM's top 100 alerts are hard negatives.
-- **The rule baseline flags too much.** Tuned on training days it picked
-  `size_ratio > 10` and `lifetime < 5s`. As fired it gives 112 alerts on AMZN
-  (46% precision, 48% recall) but 907 on MSFT (7.6% precision). Its ranking
-  inside the flagged set is weak, hence the zero precision@20.
-- **Isolation Forest is close to chance here.** It flags whatever is rare, and
-  most rare orders are not spoofs.
-- **Level-based alerts (no order IDs, the Kite-style path)** overlap 64-97% of
-  spoof orders but only 4-6% of those alerts are spoofs. Without order IDs the
-  signal is too weak to use alone.
+The first version of this project scored 0.25 PR-AUC and 0.52 precision@50 with
+ten features. Adding features that describe the moment of the cancel, size
+relative to the book around the order, and episode grouping doubled that.
+Removing one feature group at a time from the LightGBM classifier (seed 0):
 
-Per-day numbers are in `artifacts/results_per_day.csv` after a run.
+| Variant | PR-AUC | Change | Precision@50 |
+|---|---|---|---|
+| All 26 features | 0.498 | | 0.81 |
+| Without cancel context | 0.268 | -0.230 | 0.48 |
+| Without episode features | 0.395 | -0.103 | 0.74 |
+| Without placement | 0.408 | -0.091 | 0.73 |
+| Without opposite trades | 0.416 | -0.083 | 0.74 |
+| Without stock context | 0.442 | -0.056 | 0.85 |
+| Without activity window | 0.453 | -0.045 | 0.85 |
+| Without size | 0.493 | -0.005 | 0.87 |
+| Without life and fill | 0.561 | +0.063 | 0.81 |
+| Real-time features only (20) | 0.509 | +0.011 | 0.81 |
+
+Cancel context is the signal that matters most. Changes smaller than about
+0.05 are within the seed-to-seed noise, so "life and fill" hurting and "size"
+not mattering should not be read as findings. The real-time row uses only
+features known the moment the order ends (no day percentiles, day averages or
+episode grouping) and loses nothing, so the model could run on a live feed.
+
+### Is the model just finding my injection rule?
+
+Spoofs are cancelled for three different reasons, so this can be checked. Share
+of injected orders that reach the LightGBM classifier's top 100 of the day, all
+seeds pooled:
+
+| Why the order was cancelled | In top 100 | Orders |
+|---|---|---|
+| Spoof: best price came toward it | 63% | 145 |
+| Spoof: right after its own fill | 53% | 489 |
+| Spoof: fixed hold | 33% | 935 |
+| Hard negative: price moved away | 15% | 873 |
+
+So yes, partly: spoofs pulled as the price approaches are found twice as often
+as spoofs pulled on a timer, which have no cancel-time signature at all. The
+timer row is the fairest single number for "spoofing the features were not
+designed around".
+
+### Other findings
+
+- **Hard negatives are much better handled than before** (about 4% of them
+  reach the top 50, 15% the top 100) but they are still the typical false
+  alarm: 3 of the 5 highest-ranked mistakes in `artifacts/error_analysis.md`
+  are hard negatives, the other 2 are real orders from the data.
+- **Training on a wide range of injection settings made the top of the list
+  worse** on seed 0 (PR-AUC 0.39, precision@50 0.32, against 0.50 and 0.81).
+  Very small, long-lived training spoofs look like ordinary orders and dilute
+  the pattern. This is one seed and has not been repeated.
+- **Same test days with the training injection settings:** PR-AUC 0.79. The
+  gap to 0.50 is the cost of smaller, longer-held spoofs.
+- **The rule scorecard no longer floods MSFT** now that "large" is a per-stock
+  percentile (321 flags instead of 907), but it is close to useless there:
+  3% precision, 6% recall. On AMZN it flags 199 orders at 45% precision.
+- **Isolation Forest stays a negative result** even when fitted only on large
+  unfilled cancels with spoof-relevant features: 0.04 PR-AUC.
+- **Level-based alerts (no order IDs, the Kite-style path)** overlap 67-94% of
+  spoof orders but only 4-6% of those alerts are spoofs.
+
+All tables are regenerated by a run; see `artifacts/results*.csv`.
 
 ## Run it
 
 ```bash
 uv sync
-uv run python -m src.run          # about 30 seconds, writes artifacts/
-uv run pytest -q                  # 32 tests
+uv run python -m src.run          # 5 injection seeds, about 2 minutes, writes artifacts/
+uv run python -m src.run --seeds 1
+uv run pytest -q                  # 42 tests
 uv run streamlit run app/dashboard.py
 ```
 
@@ -76,11 +130,13 @@ Data: download the free 10-level sample files (AAPL, AMZN, GOOG, INTC, MSFT,
 | Load | `src/load.py` | Prices stay integers (dollars x 10,000) so they are exact book keys |
 | Book engine | `src/replay.py` | Hash map of orders plus a sorted map of price levels per side; O(n log L) |
 | Injection | `src/inject.py` | Spoof episodes (layering, repeats) and hard negatives; settings and seed in `InjectionConfig` |
-| Features | `src/features.py` | One row per order, fully vectorised, no look-ahead in the rolling median |
-| Detectors | `src/detectors/` | Rules, Isolation Forest, LightGBM; each has `fit`, `score`, `explain` |
-| Evaluation | `src/evaluate.py` | PR-AUC, precision/recall@k, hard-negative FPR |
-| Experiment | `src/run.py` | Train/test split by stock-day and by injection settings |
-| Dashboard | `app/dashboard.py` | Price timeline with alerts, book heatmap, order life story, explanation |
+| Features | `src/features.py` | One row per order, 26 features in 8 groups, fully vectorised |
+| Detectors | `src/detectors/` | Rule scorecard, Isolation Forest, LightGBM classifier and ranker; each has `fit`, `score`, `explain` |
+| Evaluation | `src/evaluate.py` | PR-AUC, precision/recall@k, episode-level metrics, hard-negative FPR, bootstrap intervals |
+| Experiment | `src/run.py` | Seeds, train/test split by stock-day and injection settings, ablation, follow-ups |
+| Reports | `src/report.py` | Order life stories and the error analysis |
+| Feedback | `src/feedback.py` | Saves a reviewer's verdicts and retrains LightGBM with them |
+| Dashboard | `app/dashboard.py` | Alert review, detector comparison, error analysis |
 
 ### Why the book is not rebuilt from messages alone
 
@@ -108,8 +164,10 @@ reproduces the whole book exactly.
   best price, held 0.5-5 seconds, then cancelled. During the hold a small
   opposite-side order is added at or inside the best price and executed.
 - An episode can layer up to 3 orders and repeat up to 3 times.
-- A spoof is pulled just before the best price reaches it, so nothing in the
-  original data would have traded against it.
+- A spoof is cancelled for one of three reasons, recorded per order: after a
+  fixed hold, right after its own fill, or when the best price starts moving
+  toward it. Whatever the reason, it is pulled before the best price reaches
+  it, so nothing in the original data would have traded against it.
 - A hard negative is the same kind of large order, cancelled 50-500 ms after
   the mid price moved away, with no opposite-side order of its own.
 - History does not react to injected orders. To keep "the price moved" from
@@ -119,6 +177,17 @@ reproduces the whole book exactly.
 Explanations: LightGBM alerts carry TreeSHAP values, computed by LightGBM's own
 `pred_contrib` (the same values `shap.TreeExplainer` returns). Rule alerts list
 which rules fired. Isolation Forest alerts list the most unusual features.
+
+## Dashboard
+
+- **Review alerts:** the day's price with every alert on it, a table of alerts
+  (per order or grouped into episodes), and for the selected alert the book
+  heatmap, its life story, and the SHAP values or rules behind the score.
+- **Feedback loop:** mark an alert "Spoof" or "Not spoof"; verdicts are saved to
+  `artifacts/review_labels.csv`. "Retrain with my reviews" refits LightGBM with
+  them and adds the result as a detector.
+- **Detector comparison:** the tables above as charts, with bootstrap whiskers.
+- **Where it fails:** the five worst false positives and five worst misses.
 
 ## Limitations
 
@@ -134,6 +203,10 @@ which rules fired. Isolation Forest alerts list the most unusual features.
   "unseen days" means unseen stocks on that date.
 - **US equities, not Indian F&O.** The live Kite path is not built. Only its
   level-based feature (`level_jump_features`) exists, tested on LOBSTER levels.
+- **Percentile and episode features need the whole day.** They are fine for
+  after-the-fact surveillance; the real-time feature set drops them.
+- **Not built:** an agent-based market simulator (for example ABIDES) in which
+  a spoof could really move the price.
 - **Not built from the guide's stack:** DuckDB, MLflow (a results CSV per run
   instead), the `shap` package, Redis, and the optional autoencoder/LSTM.
 
