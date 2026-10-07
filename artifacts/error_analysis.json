@@ -1,0 +1,372 @@
+[
+ {
+  "kind": "false positive",
+  "ticker": "MSFT",
+  "order_id": 120505860,
+  "rank": 3,
+  "of": 329827,
+  "truth": "original order from the real data",
+  "reason": "",
+  "story": "A buy order for 5,000 shares at $30.68 (larger than 99.4% of that day's orders, 6% of the visible depth on its side, 2 ticks from the best price) was added at 11:35:28.793. It was cancelled after 0.41 seconds with 0% filled. While it rested, 300 shares traded on the opposite side and the mid price moved -1.63 bps in the direction its pressure would push. When it was cancelled the best price had moved 1 tick toward it. It belongs to a group of 86 large unfilled cancels on the same side, 2 of them cancelled at the same moment.",
+  "shap": [
+   {
+    "feature": "size_pct",
+    "value": 0.9944138940283785,
+    "push": 25.82088114090776
+   },
+   {
+    "feature": "t_since_trade_level",
+    "value": 5137.064807755996,
+    "push": 11.249384746809
+   },
+   {
+    "feature": "ep_n_orders",
+    "value": 86.0,
+    "push": -9.393922550654453
+   },
+   {
+    "feature": "lifetime_s",
+    "value": 0.40672760699817445,
+    "push": 8.005203395486717
+   },
+   {
+    "feature": "dist_ticks",
+    "value": 2.0,
+    "push": 7.991579310469608
+   }
+  ]
+ },
+ {
+  "kind": "false positive",
+  "ticker": "AMZN",
+  "order_id": 287174294,
+  "rank": 8,
+  "of": 132172,
+  "truth": "hard negative (price moved away, then cancelled)",
+  "reason": "cancelled after the price moved away",
+  "story": "A sell order for 1,300 shares at $223.77 (larger than 99.9% of that day's orders, 66% of the visible depth on its side, 3 ticks from the best price) was added at 12:04:50.316. It was cancelled after 1.40 seconds with 0% filled. While it rested, 5 shares traded on the opposite side and the mid price moved +1.79 bps in the direction its pressure would push. When it was cancelled the best price had moved 2 ticks away from it.",
+  "shap": [
+   {
+    "feature": "size_pct",
+    "value": 0.9988500225628485,
+    "push": 23.121603458222104
+   },
+   {
+    "feature": "cancel_to_trade",
+    "value": 1099.0,
+    "push": 10.508653517890236
+   },
+   {
+    "feature": "opp_exec_rel",
+    "value": 0.05,
+    "push": 9.068843271830582
+   },
+   {
+    "feature": "dist_ticks",
+    "value": 3.0,
+    "push": 7.995840560804237
+   },
+   {
+    "feature": "ep_n_orders",
+    "value": 1.0,
+    "push": -7.963576079622772
+   }
+  ]
+ },
+ {
+  "kind": "false positive",
+  "ticker": "AMZN",
+  "order_id": 287174334,
+  "rank": 9,
+  "of": 132172,
+  "truth": "hard negative (price moved away, then cancelled)",
+  "reason": "cancelled after the price moved away",
+  "story": "A buy order for 1,700 shares at $221.03 (larger than 100.0% of that day's orders, 57% of the visible depth on its side, 3 ticks from the best price) was added at 15:08:43.268. It was cancelled after 0.58 seconds with 0% filled. While it rested, 6 shares traded on the opposite side and the mid price moved +4.07 bps in the direction its pressure would push. When it was cancelled the best price had moved 14 ticks away from it. It belongs to a group of 2 large unfilled cancels on the same side, 0 of them cancelled at the same moment.",
+  "shap": [
+   {
+    "feature": "size_pct",
+    "value": 0.9996143614928146,
+    "push": 26.874569286373855
+   },
+   {
+    "feature": "cancel_to_trade",
+    "value": 1440.5,
+    "push": 10.431641937338766
+   },
+   {
+    "feature": "opp_exec_rel",
+    "value": 0.06,
+    "push": 8.78939076122894
+   },
+   {
+    "feature": "ep_n_orders",
+    "value": 2.0,
+    "push": -8.229409207727688
+   },
+   {
+    "feature": "dist_ticks",
+    "value": 3.0,
+    "push": 7.958302176433101
+   }
+  ]
+ },
+ {
+  "kind": "false positive",
+  "ticker": "AMZN",
+  "order_id": 287174303,
+  "rank": 10,
+  "of": 132172,
+  "truth": "hard negative (price moved away, then cancelled)",
+  "reason": "cancelled after the price moved away",
+  "story": "A buy order for 700 shares at $224.58 (larger than 99.8% of that day's orders, 60% of the visible depth on its side, 3 ticks from the best price) was added at 11:07:43.028. It was cancelled after 0.84 seconds with 0% filled. While it rested, 2,524 shares traded on the opposite side and the mid price moved +2.89 bps in the direction its pressure would push. When it was cancelled the best price had moved 7 ticks away from it. It belongs to a group of 2 large unfilled cancels on the same side, 0 of them cancelled at the same moment.",
+  "shap": [
+   {
+    "feature": "size_pct",
+    "value": 0.9979931057279123,
+    "push": 23.591966218261987
+   },
+   {
+    "feature": "t_since_trade_level",
+    "value": 5586.420858140016,
+    "push": 11.339592246725203
+   },
+   {
+    "feature": "ep_n_orders",
+    "value": 2.0,
+    "push": -8.174622415244913
+   },
+   {
+    "feature": "dist_ticks",
+    "value": 3.0,
+    "push": 7.86762984288735
+   },
+   {
+    "feature": "lifetime_s",
+    "value": 0.841148344668909,
+    "push": 7.596231374828856
+   }
+  ]
+ },
+ {
+  "kind": "false positive",
+  "ticker": "MSFT",
+  "order_id": 281114622,
+  "rank": 11,
+  "of": 329827,
+  "truth": "original order from the real data",
+  "reason": "",
+  "story": "A buy order for 5,000 shares at $30.08 (larger than 99.4% of that day's orders, 3% of the visible depth on its side, 1 ticks from the best price) was added at 15:55:11.976. It was cancelled after 1.61 seconds with 0% filled. While it rested, 100 shares traded on the opposite side and the mid price moved +0.00 bps in the direction its pressure would push. When it was cancelled the best price had not moved relative to it. It belongs to a group of 47 large unfilled cancels on the same side, 0 of them cancelled at the same moment.",
+  "shap": [
+   {
+    "feature": "size_pct",
+    "value": 0.9944138940283785,
+    "push": 21.847140412395255
+   },
+   {
+    "feature": "ep_n_orders",
+    "value": 47.0,
+    "push": -9.51124536895899
+   },
+   {
+    "feature": "opp_exec_rel",
+    "value": 0.3333333333333333,
+    "push": 8.85878399268686
+   },
+   {
+    "feature": "lifetime_s",
+    "value": 1.607040226997924,
+    "push": 5.265832690522462
+   },
+   {
+    "feature": "dist_ticks",
+    "value": 1.0,
+    "push": 5.092744748601954
+   }
+  ]
+ },
+ {
+  "kind": "missed spoof",
+  "ticker": "MSFT",
+  "order_id": 287161602,
+  "rank": 329804,
+  "of": 329827,
+  "truth": "injected spoof",
+  "reason": "cancelled right after its own fill",
+  "story": "A buy order for 2,700 shares at $30.61 (larger than 98.4% of that day's orders, 3% of the visible depth on its side, 1 ticks from the best price) was added at 11:44:06.135. It was cancelled after 1.92 seconds with 0% filled. While it rested, 2,300 shares traded on the opposite side and the mid price moved +3.27 bps in the direction its pressure would push. When it was cancelled the best price had moved 1 tick away from it. It belongs to a group of 3 large unfilled cancels on the same side, 0 of them cancelled at the same moment.",
+  "shap": [
+   {
+    "feature": "ep_n_orders",
+    "value": 3.0,
+    "push": -9.170664555724587
+   },
+   {
+    "feature": "ep_repeats",
+    "value": 45.0,
+    "push": -6.581447016574431
+   },
+   {
+    "feature": "opp_exec_rel",
+    "value": 11.5,
+    "push": -5.431189764126659
+   },
+   {
+    "feature": "ep_n_levels",
+    "value": 2.0,
+    "push": -4.7431579768799805
+   },
+   {
+    "feature": "lifetime_s",
+    "value": 1.9160034767337493,
+    "push": -2.806778332607461
+   }
+  ]
+ },
+ {
+  "kind": "missed spoof",
+  "ticker": "MSFT",
+  "order_id": 287161665,
+  "rank": 329795,
+  "of": 329827,
+  "truth": "injected spoof",
+  "reason": "cancelled after a fixed hold",
+  "story": "A sell order for 1,800 shares at $30.70 (larger than 97.5% of that day's orders, 2% of the visible depth on its side, 3 ticks from the best price) was added at 11:36:27.219. It was cancelled after 1.74 seconds with 0% filled. While it rested, 2,222 shares traded on the opposite side and the mid price moved +3.26 bps in the direction its pressure would push. When it was cancelled the best price had moved 1 tick away from it. It belongs to a group of 30 large unfilled cancels on the same side, 0 of them cancelled at the same moment.",
+  "shap": [
+   {
+    "feature": "ep_n_orders",
+    "value": 30.0,
+    "push": -9.7853374650164
+   },
+   {
+    "feature": "ep_repeats",
+    "value": 52.0,
+    "push": -7.331275132786395
+   },
+   {
+    "feature": "opp_exec_rel",
+    "value": 7.406666666666666,
+    "push": -5.107090415798945
+   },
+   {
+    "feature": "ep_n_levels",
+    "value": 6.0,
+    "push": -4.569409954262184
+   },
+   {
+    "feature": "lifetime_s",
+    "value": 1.7377900029168813,
+    "push": -2.613467954320741
+   }
+  ]
+ },
+ {
+  "kind": "missed spoof",
+  "ticker": "MSFT",
+  "order_id": 287161585,
+  "rank": 329768,
+  "of": 329827,
+  "truth": "injected spoof",
+  "reason": "cancelled right after its own fill",
+  "story": "A buy order for 2,600 shares at $30.37 (larger than 98.3% of that day's orders, 3% of the visible depth on its side, 3 ticks from the best price) was added at 13:14:53.089. It was cancelled after 2.55 seconds with 0% filled. While it rested, 18,451 shares traded on the opposite side and the mid price moved +6.58 bps in the direction its pressure would push. When it was cancelled the best price had moved 2 ticks away from it. It belongs to a group of 34 large unfilled cancels on the same side, 1 of them cancelled at the same moment.",
+  "shap": [
+   {
+    "feature": "ep_n_orders",
+    "value": 34.0,
+    "push": -9.956705372107173
+   },
+   {
+    "feature": "opp_exec_rel",
+    "value": 61.50333333333333,
+    "push": -5.6715170263180354
+   },
+   {
+    "feature": "ep_repeats",
+    "value": 23.0,
+    "push": -4.331579958195331
+   },
+   {
+    "feature": "ep_n_levels",
+    "value": 7.0,
+    "push": -4.320091721549465
+   },
+   {
+    "feature": "mid_move_bps",
+    "value": 6.57786548265088,
+    "push": -3.2630740349241343
+   }
+  ]
+ },
+ {
+  "kind": "missed spoof",
+  "ticker": "MSFT",
+  "order_id": 287161529,
+  "rank": 329759,
+  "of": 329827,
+  "truth": "injected spoof",
+  "reason": "cancelled after a fixed hold",
+  "story": "A buy order for 2,300 shares at $30.74 (larger than 97.8% of that day's orders, 3% of the visible depth on its side, 2 ticks from the best price) was added at 10:14:12.577. It was cancelled after 2.56 seconds with 0% filled. While it rested, 200 shares traded on the opposite side and the mid price moved +1.62 bps in the direction its pressure would push. When it was cancelled the best price had moved 1 tick away from it. It belongs to a group of 301 large unfilled cancels on the same side, 0 of them cancelled at the same moment.",
+  "shap": [
+   {
+    "feature": "ep_n_orders",
+    "value": 301.0,
+    "push": -10.01264922167609
+   },
+   {
+    "feature": "ep_repeats",
+    "value": 122.0,
+    "push": -6.711779699522566
+   },
+   {
+    "feature": "ep_n_levels",
+    "value": 9.0,
+    "push": -5.0172869726053335
+   },
+   {
+    "feature": "opp_exec_rel",
+    "value": 0.5333333333333333,
+    "push": -3.9040864875846117
+   },
+   {
+    "feature": "lifetime_s",
+    "value": 2.558388618963363,
+    "push": -2.3034025791257235
+   }
+  ]
+ },
+ {
+  "kind": "missed spoof",
+  "ticker": "MSFT",
+  "order_id": 287161651,
+  "rank": 329723,
+  "of": 329827,
+  "truth": "injected spoof",
+  "reason": "cancelled right after its own fill",
+  "story": "A buy order for 1,900 shares at $30.81 (larger than 97.2% of that day's orders, 3% of the visible depth on its side, 2 ticks from the best price) was added at 10:15:15.684. It was cancelled after 2.69 seconds with 0% filled. While it rested, 100 shares traded on the opposite side and the mid price moved +0.00 bps in the direction its pressure would push. When it was cancelled the best price had not moved relative to it. It belongs to a group of 301 large unfilled cancels on the same side, 0 of them cancelled at the same moment.",
+  "shap": [
+   {
+    "feature": "ep_n_orders",
+    "value": 301.0,
+    "push": -9.321609841847359
+   },
+   {
+    "feature": "ep_repeats",
+    "value": 392.0,
+    "push": -5.82926712346091
+   },
+   {
+    "feature": "ep_n_levels",
+    "value": 9.0,
+    "push": -5.130843427133237
+   },
+   {
+    "feature": "opp_exec_rel",
+    "value": 0.2,
+    "push": -3.3171261207893923
+   },
+   {
+    "feature": "lifetime_s",
+    "value": 2.691799490865378,
+    "push": -2.6448195196536264
+   }
+  ]
+ }
+]
