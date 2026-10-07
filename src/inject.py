@@ -55,6 +55,9 @@ class _Injector:
         self.move_min = max(TICK / 2, float(np.median(self.ask - self.bid)) / 2)
         adds = msgs[msgs.event_type == ADD]
         self.median_size = adds.groupby("direction")["size"].median().to_dict()
+        # the spoofer's own fills are drawn from the sizes that really traded
+        execs = msgs[msgs.event_type == EXEC]
+        self.trade_sizes = {d: execs.loc[execs.direction == d, "size"].to_numpy() for d in (-1, 1)}
         self.next_id = int(msgs.order_id.max()) + 1
         self.rows: list[tuple] = []
 
@@ -150,8 +153,7 @@ class _Injector:
         best = self.bid[row] if direction == 1 else self.ask[row]
         inside = self.ask[row] - self.bid[row] > TICK
         price = int(best + direction * TICK) if inside else int(best)
-        raw = self.median_size[direction] * self.rng.uniform(1, 3)
-        size = max(1, int(round(raw)))
+        size = int(self.rng.choice(self.trade_sizes[direction]))
         order_id, self.next_id = self.next_id, self.next_id + 1
         self.emit(t, ADD, order_id, size, price, direction, "genuine", episode)
         self.emit(t + 1e-4, EXEC, order_id, size, price, direction, "genuine", episode)

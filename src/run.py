@@ -32,6 +32,10 @@ TRAIN = {
     "GOOG": InjectionConfig(k_choices=(10, 20), hold_s=(0.5, 3.0), levels_away=(1, 2), seed=12),
     "INTC": InjectionConfig(k_choices=(10, 20), hold_s=(0.5, 3.0), levels_away=(1, 2), seed=13),
 }
+# same training days, but a wide spread of settings that covers the test ones
+WIDE = dict(k_choices=(3, 5, 8, 10, 15, 20, 30), hold_s=(0.2, 10.0), levels_away=(1, 3))
+TRAIN_WIDE = {"AAPL": InjectionConfig(**WIDE, seed=31), "GOOG": InjectionConfig(**WIDE, seed=32),
+              "INTC": InjectionConfig(**WIDE, seed=33)}
 TEST = {  # unseen days, smaller orders, longer holds, one level deeper
     "AMZN": InjectionConfig(k_choices=(5, 8, 15), hold_s=(1.0, 5.0), levels_away=(1, 3), seed=21),
     "MSFT": InjectionConfig(k_choices=(5, 8, 15), hold_s=(1.0, 5.0), levels_away=(1, 3), seed=22),
@@ -116,6 +120,11 @@ def main() -> None:
     rules = detectors[0]
     print(f"rules tuned on train: size_ratio > {rules.min_size_ratio}, lifetime < {rules.max_lifetime_s}s")
 
+    wide = pd.concat([prepare(t, cfg, files, keep_raw=False) for t, cfg in TRAIN_WIDE.items()])
+    wide = wide[wide.role != "genuine"]
+    wide_detectors = [RuleDetector().fit(wide), IsolationForestDetector().fit(wide),
+                      LightGBMDetector().fit(wide)]
+
     per_day = score_days(test, detectors, save=True)
     per_day.to_csv(OUT / "results_per_day.csv", index=False)
     metrics = ["pr_auc"] + [f"{m}@{k}" for k in evaluate.KS for m in ("precision", "recall", "hard_neg_fpr")]
@@ -124,6 +133,8 @@ def main() -> None:
     summary.to_csv(OUT / "results.csv")
     seen_summary = score_days(seen, detectors, save=False).groupby("detector")[metrics].mean().loc[order]
     seen_summary.to_csv(OUT / "results_seen_settings.csv")
+    wide_summary = score_days(test, wide_detectors, save=False).groupby("detector")[metrics].mean().loc[order]
+    wide_summary.to_csv(OUT / "results_wide_training.csv")
     level = pd.DataFrame([level_based_check(t, o[o.role != "genuine"]) for t, o in test.items()])
     level.to_csv(OUT / "results_level_based.csv", index=False)
 
@@ -133,6 +144,7 @@ def main() -> None:
                                     for t, r in base.iterrows()))
     print("\nUnseen days, unseen injection settings (mean over test days)\n", summary.round(3).to_string())
     print("\nUnseen days, training injection settings\n", seen_summary.round(3).to_string())
+    print("\nSame test, detectors trained on wide injection settings\n", wide_summary.round(3).to_string())
     print("\nRule flags as fired\n", per_day[per_day.detector == "rules (flag)"]
           .dropna(axis=1).round(3).to_string(index=False))
     print("\nLevel-based alerts (no order ids)\n", level.round(3).to_string(index=False))

@@ -10,38 +10,49 @@ It flags order patterns. It does not accuse anyone, and it does not trade.
 
 ## Results
 
-Test set: AMZN and MSFT on 2012-06-21 (462k orders, 271 injected spoof orders,
+Test set: AMZN and MSFT on 2012-06-21 (462k orders, 267 injected spoof orders,
 188 hard negatives). Trained on AAPL, GOOG and INTC with different injection
 settings. Mean over the two test days:
 
 | Detector | PR-AUC | Precision@20 | Precision@50 | Precision@100 | Recall@100 | Hard-negative FPR@50 |
 |---|---|---|---|---|---|---|
-| Rule baseline | 0.146 | 0.03 | 0.15 | 0.20 | 0.17 | 0.08 |
-| Isolation Forest | 0.006 | 0.00 | 0.00 | 0.01 | 0.00 | 0.01 |
-| LightGBM | **0.258** | **0.50** | **0.58** | **0.43** | **0.34** | 0.09 |
+| Rule baseline | 0.188 | 0.00 | 0.16 | 0.25 | 0.23 | 0.07 |
+| Isolation Forest | 0.006 | 0.00 | 0.00 | 0.00 | 0.00 | 0.01 |
+| LightGBM | **0.246** | **0.48** | **0.52** | **0.41** | **0.33** | 0.07 |
 
 The base rate is 0.06%, so a random ranking has PR-AUC 0.0006.
+
+Two follow-up runs on the same test days, LightGBM only:
+
+| Training / test injection settings | PR-AUC | Precision@50 | Precision@100 | Recall@100 |
+|---|---|---|---|---|
+| Narrow training (k = 10-20), test k = 5-15 (the table above) | 0.246 | 0.52 | 0.41 | 0.33 |
+| Wide training (k = 3-30, holds 0.2-10 s), test k = 5-15 | 0.304 | 0.44 | 0.48 | 0.38 |
+| Narrow training, test injected with the training settings | 0.678 | 0.70 | 0.77 | 0.65 |
 
 What the numbers say:
 
 - **LightGBM is the only detector an analyst could work from**, and it is far
-  from solved: 4 in 10 of its top 50 alerts per day are not injected spoofs.
-- **It learned the injection style.** On the same test days injected with the
-  *training* settings, its PR-AUC is 0.620 and precision@100 is 0.69. Moving to
-  smaller orders (k = 5-15 instead of 10-20), longer holds and one level deeper
-  costs more than half of that. On MSFT it finds 3% of spoof orders under 6x
-  the median size in its top 100.
+  from solved: about half of its top 50 alerts per day are not injected spoofs.
+- **Smaller spoofs are simply harder, not just unfamiliar.** The model scores
+  0.678 PR-AUC when the test spoofs are as large as the training ones and 0.246
+  when they are smaller. Training on a wide range that covers the test settings
+  only recovers it to 0.304, and precision@50 gets worse. So most of the drop
+  is the task getting harder (a 5x order hides among natural large orders),
+  not the model memorising one injection style.
+- **MSFT is the weak spot.** LightGBM's PR-AUC is 0.40 on AMZN and 0.09 on
+  MSFT, a one-tick-spread stock with far more natural large fast cancels.
 - **Hard negatives are a real problem.** A large order cancelled after the
   price moved away looks almost the same as a spoof without trader IDs. On AMZN
-  31 of LightGBM's top 100 alerts are hard negatives.
+  36 of LightGBM's top 100 alerts are hard negatives.
 - **The rule baseline flags too much.** Tuned on training days it picked
-  `size_ratio > 10` and `lifetime < 5s`. As fired it gives 98 alerts on AMZN
-  (39% precision, 34% recall) but 904 on MSFT (7.5% precision). Its ranking
-  inside the flagged set is weak, hence the low precision@20.
-- **Isolation Forest is no better than chance here.** It flags whatever is
-  rare, and most rare orders are not spoofs.
-- **Level-based alerts (no order IDs, the Kite-style path)** overlap 65-85% of
-  spoof orders but only 4-5% of those alerts are spoofs. Without order IDs the
+  `size_ratio > 10` and `lifetime < 5s`. As fired it gives 112 alerts on AMZN
+  (46% precision, 48% recall) but 907 on MSFT (7.6% precision). Its ranking
+  inside the flagged set is weak, hence the zero precision@20.
+- **Isolation Forest is close to chance here.** It flags whatever is rare, and
+  most rare orders are not spoofs.
+- **Level-based alerts (no order IDs, the Kite-style path)** overlap 64-97% of
+  spoof orders but only 4-6% of those alerts are spoofs. Without order IDs the
   signal is too weak to use alone.
 
 Per-day numbers are in `artifacts/results_per_day.csv` after a run.
@@ -50,7 +61,7 @@ Per-day numbers are in `artifacts/results_per_day.csv` after a run.
 
 ```bash
 uv sync
-uv run python -m src.run          # about 20 seconds, writes artifacts/
+uv run python -m src.run          # about 30 seconds, writes artifacts/
 uv run pytest -q                  # 32 tests
 uv run streamlit run app/dashboard.py
 ```
@@ -114,10 +125,8 @@ which rules fired. Isolation Forest alerts list the most unusual features.
 - **Synthetic labels.** The detectors are scored on spoofing I wrote. Good
   numbers here show the pipeline can find this pattern, not that it finds real
   spoofing. The seen-versus-unseen gap above is the honest measure of that risk.
-- **Known injection artefact.** The opposite-side fill is 1-3x the median order
-  size, so 61% of spoof orders have `opp_exec_rel` between 1 and 3 against 3%
-  of natural large fast cancels. No single feature gets PR-AUC above 0.02 on
-  its own, but the model can lean on this.
+- **Injected fills are simplified.** The spoofer's own opposite-side order is
+  one order, fully filled, with a size drawn from that day's real trade sizes.
 - **No trader IDs.** The fake order cannot be linked to the opposite-side trade
   by the same participant. Alerts are order-level patterns, not proof of intent.
 - **No market reaction.** An injected order cannot move the real price.
